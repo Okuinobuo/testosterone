@@ -1,0 +1,95 @@
+import pandas as pd
+import numpy as np
+from google.colab import files
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+# Upload button
+uploaded = files.upload()
+
+# Load data
+file_name = list(uploaded.keys())[0]
+data = pd.read_csv(file_name)
+
+# Calculate recent cancer within 5 years
+def calculate_recent_cancer(row, cancer_columns):
+    if row[cancer_columns].isna().all():
+        return False
+    else:
+        min_difference = (row['Age'] - row[cancer_columns]).min(skipna=True)
+        return min_difference <= 5
+
+cancer_columns = [
+    "MCQ240A", "MCQ240AA", "MCQ240B", "MCQ240BB", "MCQ240C", "MCQ240CC",
+    "MCQ240D", "MCQ240DD", "MCQ240DK", "MCQ240E", "MCQ240F", "MCQ240G",
+    "MCQ240H", "MCQ240I", "MCQ240J", "MCQ240K", "MCQ240L", "MCQ240M",
+    "MCQ240N", "MCQ240O", "MCQ240P", "MCQ240Q", "MCQ240R", "MCQ240S",
+    "MCQ240T", "MCQ240U", "MCQ240V", "MCQ240W", "MCQ240X", "MCQ240Y",
+    "MCQ240Z"
+]
+data['Recent_Cancer'] = data.apply(lambda row: calculate_recent_cancer(row, cancer_columns), axis=1)
+
+# Scoring and sensitivity calculation
+def calculate_score(row, kidney_threshold, crp_threshold, testosterone_threshold):
+    score = 0
+    if row['Creatinine_serum_mg_dL'] > kidney_threshold:
+        score += 2
+    if row['HS C-Reactive Protein (mg/L)'] > crp_threshold:
+        score += 2
+    if row['Testosterone_total_ng_dL'] < testosterone_threshold:
+        score += 1
+    return score
+
+# Set threshold ranges
+kidney_thresholds = np.linspace(1.0, 2.0, 10)  # 1.0 to 2.0, 10 steps
+crp_thresholds = np.linspace(2.0, 6.0, 10)     # 2.0 to 6.0, 10 steps
+testosterone_thresholds = np.linspace(200, 350, 10)  # 200 to 350, 10 steps
+
+# List to store sensitivity results
+sensitivity_results = []
+
+for kidney in kidney_thresholds:
+    for crp in crp_thresholds:
+        for testosterone in testosterone_thresholds:
+            # Calculate score
+            data['Score'] = data.apply(
+                lambda row: calculate_score(row, kidney, crp, testosterone), axis=1
+            )
+
+            # Identify high risk
+            data['High_Risk'] = data['Score'] >= 5
+
+            # Calculate sensitivity (True Positive Rate)
+            y_true = data['Recent_Cancer']
+            y_pred = data['High_Risk']
+            true_positive = np.sum((y_true == True) & (y_pred == True))
+            false_negative = np.sum((y_true == True) & (y_pred == False))
+            sensitivity = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
+
+            # Save results
+            sensitivity_results.append((kidney, crp, testosterone, sensitivity))
+
+# Convert sensitivity results to a DataFrame
+sensitivity_df = pd.DataFrame(sensitivity_results, columns=['Kidney_Threshold', 'CRP_Threshold', 'Testosterone_Threshold', 'Sensitivity'])
+
+# 3D plot
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Data for 3D plot
+x = sensitivity_df['Kidney_Threshold']
+y = sensitivity_df['CRP_Threshold']
+z = sensitivity_df['Sensitivity']
+c = sensitivity_df['Testosterone_Threshold']
+
+# Plot
+sc = ax.scatter(x, y, z, c=c, cmap='viridis', alpha=0.8)
+ax.set_title("Sensitivity Across Threshold Combinations", fontsize=14)
+ax.set_xlabel("Kidney Threshold (mg/dL)", fontsize=12)
+ax.set_ylabel("CRP Threshold (mg/L)", fontsize=12)
+ax.set_zlabel("Sensitivity", fontsize=12)
+plt.colorbar(sc, label="Testosterone Threshold (ng/dL)")
+
+plt.tight_layout()
+plt.show()
